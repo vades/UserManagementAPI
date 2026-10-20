@@ -1,0 +1,45 @@
+## --- Build & Compilation Artifacts ---
+[Bb]in/
+[Oo]bj/
+out/
+publish/
+
+## --- Environment & Secrets ---
+# Do not commit local environment secrets or connection strings
+appsettings.Development.json
+appsettings.Local.json
+*.env
+
+## --- JetBrains Rider / IDE Settings ---
+.idea/
+*.sln.iml
+*_wpftmp/
+
+## --- Visual Studio & VS Code ---
+.vs/
+.vscode/
+*.user
+*.userossc
+*.suo
+*.userprefs
+
+## --- NuGet Packages & Caches ---
+*.nupkg
+*.snupkg
+project.lock.json
+project.assets.json
+*.nuget.props
+*.nuget.targets
+packages/
+
+## --- Testing & Coverage Output ---
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+## --- OS Generated Files ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
