@@ -43,3 +43,8 @@ TestResults/
 Thumbs.db
 ehthumbs.db
 desktop.ini
+
+# SQLite database (local data, not source code)
+data/*.db
+data/*.db-shm
+data/*.db-wal
