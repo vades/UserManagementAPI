@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.Data.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<UserStore>();
@@ -55,7 +57,7 @@ static IResult UpdateResponse((UserChangeResult Result, User? User) outcome, int
 var users = app.MapGroup("/api/users");
 
 // GET: users with paging
-users.MapGet("", (UserStore store, int page = 1, int pageSize = 10) =>
+users.MapGet("", async (UserStore store, int page = 1, int pageSize = 10) =>
 {
     if (page < 1)
     {
@@ -70,7 +72,7 @@ users.MapGet("", (UserStore store, int page = 1, int pageSize = 10) =>
         });
     }
 
-    var (items, totalCount) = store.GetPage(page, pageSize);
+    var (items, totalCount) = await store.GetPageAsync(page, pageSize);
 
     return Results.Ok(new
     {
@@ -87,9 +89,9 @@ users.MapGet("", (UserStore store, int page = 1, int pageSize = 10) =>
 });
 
 // GET: one user by ID
-users.MapGet("/{id:int}", (int id, UserStore store) =>
+users.MapGet("/{id:int}", async (int id, UserStore store) =>
 {
-    var user = store.GetById(id);
+    var user = await store.GetByIdAsync(id);
 
     if (user is null)
     {
@@ -100,7 +102,7 @@ users.MapGet("/{id:int}", (int id, UserStore store) =>
 });
 
 // POST: add a new user (both fields required)
-users.MapPost("", (CreateUserRequest request, UserStore store) =>
+users.MapPost("", async (CreateUserRequest request, UserStore store) =>
 {
     var errors = UserValidation.Validate(request.Name, request.Email, requireAll: true);
 
@@ -109,7 +111,7 @@ users.MapPost("", (CreateUserRequest request, UserStore store) =>
         return ValidationFailed(errors);
     }
 
-    var (result, user) = store.Add(request.Name, request.Email);
+    var (result, user) = await store.AddAsync(request.Name, request.Email);
 
     if (result != UserChangeResult.Success || user is null)
     {
@@ -121,7 +123,7 @@ users.MapPost("", (CreateUserRequest request, UserStore store) =>
 });
 
 // PUT: replace a user (both fields required)
-users.MapPut("/{id:int}", (int id, UpdateUserRequest request, UserStore store) =>
+users.MapPut("/{id:int}", async (int id, UpdateUserRequest request, UserStore store) =>
 {
     var errors = UserValidation.Validate(request.Name, request.Email, requireAll: true);
 
@@ -130,11 +132,11 @@ users.MapPut("/{id:int}", (int id, UpdateUserRequest request, UserStore store) =
         return ValidationFailed(errors);
     }
 
-    return UpdateResponse(store.Update(id, request.Name, request.Email), id);
+    return UpdateResponse(await store.UpdateAsync(id, request.Name, request.Email), id);
 });
 
 // PATCH: partial update (send only the fields you want to change)
-users.MapPatch("/{id:int}", (int id, UpdateUserRequest request, UserStore store) =>
+users.MapPatch("/{id:int}", async (int id, UpdateUserRequest request, UserStore store) =>
 {
     if (request.Name is null && request.Email is null)
     {
@@ -148,13 +150,13 @@ users.MapPatch("/{id:int}", (int id, UpdateUserRequest request, UserStore store)
         return ValidationFailed(errors);
     }
 
-    return UpdateResponse(store.Update(id, request.Name, request.Email), id);
+    return UpdateResponse(await store.UpdateAsync(id, request.Name, request.Email), id);
 });
 
 // DELETE: remove a user
-users.MapDelete("/{id:int}", (int id, UserStore store) =>
+users.MapDelete("/{id:int}", async (int id, UserStore store) =>
 {
-    if (store.Delete(id) == UserChangeResult.NotFound)
+    if (await store.DeleteAsync(id) == UserChangeResult.NotFound)
     {
         return UserNotFound(id);
     }
@@ -165,7 +167,7 @@ users.MapDelete("/{id:int}", (int id, UserStore store) =>
 app.Run();
 
 // Models
-record User(int Id, string Name, string Email);
+record User(int Id, string Name, string Email, DateTime CreatedAt, DateTime UpdatedAt);
 record CreateUserRequest(string Name, string Email);
 record UpdateUserRequest(string? Name, string? Email);
 
@@ -176,119 +178,175 @@ enum UserChangeResult
     DuplicateEmail
 }
 
-// Thread-safe in-memory storage
-sealed class UserStore(ILogger<UserStore> logger)
+// Data access with raw SQL and parameters (no ORM)
+sealed class UserStore(IConfiguration configuration, ILogger<UserStore> logger)
 {
-    private readonly object _lock = new();
-    private readonly Dictionary<int, User> _users = new()
-    {
-        [1] = new User(1, "Alice", "alice@example.com"),
-        [2] = new User(2, "Bob", "bob@example.com")
-    };
-    private int _nextId = 3;
+    private const string SelectColumns = "Id, Name, Email, CreatedAt, UpdatedAt";
 
-    public (List<User> Items, int TotalCount) GetPage(int page, int pageSize)
+    private readonly string _connectionString =
+        configuration.GetConnectionString("UsersDb")
+        ?? throw new InvalidOperationException("Connection string 'UsersDb' is missing in appsettings.json.");
+
+    public async Task<(List<User> Items, int TotalCount)> GetPageAsync(int page, int pageSize)
     {
-        lock (_lock)
+        await using var connection = await OpenConnectionAsync();
+
+        await using var countCommand = connection.CreateCommand();
+        countCommand.CommandText = "SELECT COUNT(*) FROM Users;";
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        await using var pageCommand = connection.CreateCommand();
+        pageCommand.CommandText = $"SELECT {SelectColumns} FROM Users ORDER BY Id LIMIT $take OFFSET $skip;";
+        pageCommand.Parameters.AddWithValue("$take", pageSize);
+        pageCommand.Parameters.AddWithValue("$skip", (long)(page - 1) * pageSize);
+
+        var items = new List<User>();
+
+        await using var reader = await pageCommand.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
         {
-            var all = _users.Values.OrderBy(u => u.Id).ToList();
-            var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
-
-            return (all.Skip(skip).Take(pageSize).ToList(), all.Count);
+            items.Add(ReadUser(reader));
         }
+
+        return (items, totalCount);
     }
 
-    public User? GetById(int id)
+    public async Task<User?> GetByIdAsync(int id)
     {
-        lock (_lock)
-        {
-            return _users.GetValueOrDefault(id);
-        }
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT {SelectColumns} FROM Users WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+
+        await using var reader = await command.ExecuteReaderAsync();
+
+        return await reader.ReadAsync() ? ReadUser(reader) : null;
     }
 
-    public (UserChangeResult Result, User? User) Add(string name, string email)
+    public async Task<(UserChangeResult Result, User? User)> AddAsync(string name, string email)
     {
-        var normalizedEmail = NormalizeEmail(email);
+        await using var connection = await OpenConnectionAsync();
 
-        lock (_lock)
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO Users (Name, Email, CreatedAt, UpdatedAt)
+            VALUES ($name, $email, $now, $now)
+            RETURNING {SelectColumns};
+            """;
+        command.Parameters.AddWithValue("$name", name.Trim());
+        command.Parameters.AddWithValue("$email", NormalizeEmail(email));
+        command.Parameters.AddWithValue("$now", UtcNowText());
+
+        try
         {
-            if (IsEmailTaken(normalizedEmail, null))
-            {
-                return (UserChangeResult.DuplicateEmail, null);
-            }
+            await using var reader = await command.ExecuteReaderAsync();
+            await reader.ReadAsync();
 
-            var user = new User(_nextId, name.Trim(), normalizedEmail);
-
-            try
-            {
-                // Add throws on a duplicate key (the indexer would silently overwrite it)
-                _users.Add(user.Id, user);
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogError(ex, "Failed to store user with ID {UserId}.", user.Id);
-                throw; // The global handler turns this into a JSON 500
-            }
-
-            _nextId++;
-            logger.LogInformation("User {UserId} created.", user.Id);
-
-            return (UserChangeResult.Success, user);
+            return (UserChangeResult.Success, ReadUser(reader));
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // UNIQUE constraint on Email
+        {
+            return (UserChangeResult.DuplicateEmail, null);
+        }
+        catch (SqliteException ex)
+        {
+            logger.LogError(ex, "Failed to insert user with email {Email}.", email);
+            throw; // The global handler turns this into a JSON 500
+        }
+        finally
+        {
+            logger.LogInformation("Add user attempted.");
         }
     }
 
     // Used by both PUT (all fields) and PATCH (null means "keep current value")
-    public (UserChangeResult Result, User? User) Update(int id, string? name, string? email)
+    public async Task<(UserChangeResult Result, User? User)> UpdateAsync(int id, string? name, string? email)
     {
-        lock (_lock)
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            UPDATE Users
+            SET Name = COALESCE($name, Name),
+                Email = COALESCE($email, Email),
+                UpdatedAt = $now
+            WHERE Id = $id
+            RETURNING {SelectColumns};
+            """;
+        command.Parameters.AddWithValue("$name", (object?)name?.Trim() ?? DBNull.Value);
+        command.Parameters.AddWithValue("$email", (object?)(email is null ? null : NormalizeEmail(email)) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$now", UtcNowText());
+        command.Parameters.AddWithValue("$id", id);
+
+        try
         {
-            if (!_users.TryGetValue(id, out var existing))
+            await using var reader = await command.ExecuteReaderAsync();
+
+            if (!await reader.ReadAsync())
             {
                 return (UserChangeResult.NotFound, null);
             }
 
-            var updated = existing with
-            {
-                Name = name?.Trim() ?? existing.Name,
-                Email = email is null ? existing.Email : NormalizeEmail(email)
-            };
-
-            if (IsEmailTaken(updated.Email, id))
-            {
-                return (UserChangeResult.DuplicateEmail, null);
-            }
-
-            _users[id] = updated;
+            var user = ReadUser(reader);
             logger.LogInformation("User {UserId} updated.", id);
 
-            return (UserChangeResult.Success, updated);
+            return (UserChangeResult.Success, user);
         }
-    }
-
-    public UserChangeResult Delete(int id)
-    {
-        lock (_lock)
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // UNIQUE constraint on Email
         {
-            if (!_users.Remove(id))
-            {
-                return UserChangeResult.NotFound;
-            }
-
-            logger.LogInformation("User {UserId} deleted.", id);
-
-            return UserChangeResult.Success;
+            return (UserChangeResult.DuplicateEmail, null);
+        }
+        catch (SqliteException ex)
+        {
+            logger.LogError(ex, "Failed to update user {UserId}.", id);
+            throw;
         }
     }
+
+    public async Task<UserChangeResult> DeleteAsync(int id)
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Users WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+
+        if (await command.ExecuteNonQueryAsync() == 0)
+        {
+            return UserChangeResult.NotFound;
+        }
+
+        logger.LogInformation("User {UserId} deleted.", id);
+
+        return UserChangeResult.Success;
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        return connection;
+    }
+
+    private static User ReadUser(SqliteDataReader reader) => new(
+        reader.GetInt32(0),
+        reader.GetString(1),
+        reader.GetString(2),
+        ParseUtc(reader.GetString(3)),
+        ParseUtc(reader.GetString(4)));
+
+    private static DateTime ParseUtc(string value) =>
+        DateTime.Parse(value, CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+    // Matches the format used by the migration: 2026-10-27T08:06:07Z
+    private static string UtcNowText() =>
+        DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
-
-    // Must be called inside the lock
-    private bool IsEmailTaken(string email, int? excludeId)
-    {
-        return _users.Values.Any(u =>
-            u.Id != excludeId &&
-            string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));
-    }
 }
 
 // Input validation rules

@@ -1,44 +1,250 @@
 # Users API
 
+A simple REST API for managing users, built with **.NET 10**, **C# 14**, **Minimal API**, and **SQLite**. It uses raw SQL with `Microsoft.Data.Sqlite`, with no ORM.
+
+This project is a learning exercise. It is built step by step, and each activity is reviewed before the next one starts.
+
+---
+
 ## 1. What is this API about?
 
-This is a simple REST API built with **.NET 10** and **C# 14** for managing users. It uses **Minimal API** and stores data in memory, so it needs no database and is a good starting point for learning how CRUD operations work over HTTP.
+The API manages users with the four CRUD operations, plus PATCH for partial updates. Users are stored in a local SQLite database file at `data/users.db`.
 
-The API supports these operations:
+| Method | Endpoint | Purpose | Success | Errors |
+|--------|----------|---------|---------|--------|
+| GET | `/api/users?page=1&pageSize=10` | List users (paged) | 200 | 400 |
+| GET | `/api/users/{id}` | Get one user | 200 | 404 |
+| POST | `/api/users` | Add a user | 201 | 400, 409 |
+| PUT | `/api/users/{id}` | Replace a user (name and email required) | 200 | 400, 404, 409 |
+| PATCH | `/api/users/{id}` | Update only the fields you send | 200 | 400, 404, 409 |
+| DELETE | `/api/users/{id}` | Delete a user | 200 | 404 |
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/api/users` | Get all users |
-| GET | `/api/users/{id}` | Get one user by ID |
-| POST | `/api/users` | Add a new user |
-| PUT | `/api/users/{id}` | Update an existing user |
-| DELETE | `/api/users/{id}` | Delete a user by ID |
+### Response format
 
-## 2. What we did in Activity 1
+Every response is JSON with a `message`. Successful responses that return data also include a `data` field. Paged lists include a `pagination` object. Validation errors include an `errors` object that lists each failing field.
 
-Activity 1 focused on writing and enhancing the API code:
+### Validation rules
 
-- Created a new minimal API project with `dotnet new web`.
-- Implemented all four CRUD operations for users.
-- Used an in-memory `List<User>` with two seed users.
-- Returned consistent JSON responses, each with a `message` and, when relevant, a `data` field.
-- Used the correct HTTP status codes: `200 OK`, `201 Created`, `400 Bad Request`, and `404 Not Found`.
-- Validated that `Name` and `Email` are not empty on POST and PUT.
-- Applied a consistent code style with braces on every `if` block.
+- `name` is required, trimmed, and at most 100 characters.
+- `email` is required, trimmed, at most 255 characters, and must have a valid format. It is stored in lowercase.
+- Emails are unique and case-insensitive. A duplicate returns `409 Conflict`.
+- `pageSize` must be between 1 and 100, and `page` must be 1 or greater.
 
-## 3. How the coding assistant helped
+---
 
-- Explained the purpose of each part of the code and the reasoning behind it.
-- Wrote the complete code for each step so it was easy to run and test.
-- Provided `curl` commands and sample JSON requests and responses for testing.
-- Adjusted the code style to match your preferences, such as always using braces for `if` blocks.
-- Pointed out limitations of the current approach, such as the in-memory list not being thread-safe, and noted that it will be improved in later activities.
-- Kept each step small so you could review, test, and approve it before moving on.
+## 2. What we did in each activity
 
-## Running the project
+### Activity 1: CRUD endpoints
 
-```bash
+- Created a minimal API project with all four CRUD operations.
+- Returned consistent JSON responses with the correct HTTP status codes.
+- Validated the request fields on POST and PUT.
+- Used an in-memory list to store the users.
+
+### Activity 2: Database layer (final version)
+
+Activity 2 replaced the in-memory storage with a real SQLite database and included the following work:
+
+- **Bug fixes from the review:** input validation, a global exception handler that always returns JSON, paging for GET all, PATCH support, and logging. The `try/catch` pattern is in the data access layer, where database errors can occur.
+- **Database setup:** the `Microsoft.Data.Sqlite` NuGet package, a `data/` folder, and a connection string in `appsettings.json`.
+- **Migration:** `Migrations/001_create_users.sql` creates the `Users` table with `Id`, `Name`, `Email`, `CreatedAt`, and `UpdatedAt`. It also inserts two sample users.
+- **Raw SQL data access:** the `UserStore` class runs parameterized SQL commands. It uses `RETURNING` to get the saved row in the same statement and `UNIQUE` on `Email` to prevent duplicates, even under concurrent requests.
+- **Async endpoints:** all endpoints and store methods are async.
+- **Git ignore:** `data/*.db` files are excluded from source control.
+
+### Database schema
+
+```sql
+CREATE TABLE IF NOT EXISTS Users (
+    Id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name       TEXT    NOT NULL,
+    Email      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    CreatedAt  TEXT    NOT NULL,
+    UpdatedAt  TEXT    NOT NULL
+);
+```
+
+Timestamps are stored as UTC text in ISO 8601 format, for example `2026-10-27T08:06:07Z`.
+
+---
+
+## 3. Project structure
+
+```
+UserManagementAPI/
+├── Program.cs
+├── appsettings.json
+├── UserManagementAPI.csproj
+├── Migrations/
+│   └── 001_create_users.sql
+└── data/
+    └── users.db          (created by the migration, not in source control)
+```
+
+---
+
+## 4. Setup guide
+
+### Requirements
+
+- .NET 10 SDK
+- Rider or Visual Studio (optional)
+- SQLite command-line tool (optional, for inspecting the database)
+
+### Install the SQLite command-line tool (Windows)
+
+Option A, with winget (recommended):
+
+```powershell
+winget install SQLite.SQLite
+```
+
+Close PowerShell, open a new window, and check the installation:
+
+```powershell
+sqlite3 --version
+```
+
+If `sqlite3` is not found, locate the executable and add its folder to your user PATH:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter sqlite3.exe -ErrorAction SilentlyContinue | Select-Object FullName
+```
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";<folder-containing-sqlite3.exe>", "User")
+```
+
+Use the folder, not the file. Then restart PowerShell.
+
+Option B: download `sqlite-tools-win-x64-*.zip` from https://www.sqlite.org/download.html, extract it, and add the folder with `sqlite3.exe` to your PATH.
+
+### Install the NuGet package
+
+From the project folder:
+
+```powershell
+dotnet add package Microsoft.Data.Sqlite
+```
+
+### Create the database
+
+Create the data folder, then run the migration:
+
+```powershell
+mkdir data
+sqlite3 data\users.db ".read Migrations\001_create_users.sql"
+```
+
+The migration is safe to run more than once. Check the table:
+
+```powershell
+sqlite3 data\users.db "SELECT * FROM Users;"
+```
+
+### Run the API
+
+```powershell
 dotnet run
 ```
 
-Then open the URL shown in the console and test the endpoints using `curl`, Postman, or any HTTP client.
+Note the URL shown in the console, for example `http://localhost:5000`. Use that URL in the examples below.
+
+---
+
+## 5. How to test the API
+
+The examples use `curl`. Replace the port with the one shown in your console.
+
+### GET all users (paged)
+
+```bash
+curl "http://localhost:5000/api/users?page=1&pageSize=10"
+```
+
+### GET one user
+
+```bash
+curl http://localhost:5000/api/users/1
+```
+
+### POST a new user
+
+```bash
+curl -X POST http://localhost:5000/api/users -H "Content-Type: application/json" -d "{\"name\":\"Charlie\",\"email\":\"charlie@example.com\"}"
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "message": "User created successfully.",
+  "data": {
+    "id": 3,
+    "name": "Charlie",
+    "email": "charlie@example.com",
+    "createdAt": "2026-10-27T08:10:00Z",
+    "updatedAt": "2026-10-27T08:10:00Z"
+  }
+}
+```
+
+### PUT (replace both fields)
+
+```bash
+curl -X PUT http://localhost:5000/api/users/1 -H "Content-Type: application/json" -d "{\"name\":\"Alice Miller\",\"email\":\"alice.miller@example.com\"}"
+```
+
+### PATCH (change only the name)
+
+```bash
+curl -X PATCH http://localhost:5000/api/users/1 -H "Content-Type: application/json" -d "{\"name\":\"Alice Smith\"}"
+```
+
+`createdAt` stays the same, and `updatedAt` changes.
+
+### DELETE a user
+
+```bash
+curl -X DELETE http://localhost:5000/api/users/2
+```
+
+### Error cases to try
+
+```bash
+# Duplicate email (409)
+curl -X POST http://localhost:5000/api/users -H "Content-Type: application/json" -d "{\"name\":\"Alice 2\",\"email\":\"ALICE@example.com\"}"
+
+# Invalid email (400)
+curl -X POST http://localhost:5000/api/users -H "Content-Type: application/json" -d "{\"name\":\"Dan\",\"email\":\"not-an-email\"}"
+
+# Invalid JSON (400)
+curl -X POST http://localhost:5000/api/users -H "Content-Type: application/json" -d "{bad json"
+
+# Unknown user (404)
+curl http://localhost:5000/api/users/999
+
+# Invalid page size (400)
+curl "http://localhost:5000/api/users?pageSize=500"
+```
+
+### Check the database directly
+
+After each change, compare the API result with the table:
+
+```powershell
+sqlite3 data\users.db "SELECT * FROM Users;"
+```
+
+---
+
+## 6. How the coding assistant helped
+
+- Explained what each part of the code does and why it is written that way, so the design choices are clear.
+- Wrote complete code for each step, including the project setup, migration, and store rewrite.
+- Reviewed the first version and found issues: missing validation, inconsistent errors, thread-safety risks, and linear lookups. Then fixed them.
+- Simplified the code without changing the approved behavior.
+- Helped with the setup, including the SQLite installation and PATH problems on Windows.
+- Gave `curl` commands and sample requests and responses for testing.
+- Adjusted the code to your preferences, such as always using braces for `if` blocks and putting the connection string in `appsettings.json`.
+- Kept each step small so you could review and approve it before the next one.
