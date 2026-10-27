@@ -32,7 +32,49 @@ Every response is JSON with a `message`. Successful responses that return data a
 
 ---
 
-## 2. What we did in each activity
+## 2. Project structure
+
+The code is organized by feature. Shared code lives in `Common/`, and everything about users lives in `Features/Users/`.
+
+```text
+UserManagementAPI/
+├── Program.cs                          # Startup: services, error handler, endpoint mapping
+├── appsettings.json                    # Connection string and logging config
+├── UserManagementAPI.csproj
+├── Common/
+│   ├── Errors/
+│   │   └── GlobalExceptionHandler.cs   # JSON error responses for unhandled exceptions
+│   └── Responses/
+│       └── ApiResponses.cs             # Shared helpers: NotFound, Conflict, ValidationFailed
+├── Features/
+│   └── Users/
+│       ├── Endpoints/
+│       │   └── UserEndpoints.cs        # All /api/users routes
+│       ├── Models/
+│       │   ├── User.cs                 # User record and UserChangeResult enum
+│       │   └── UserRequests.cs         # CreateUserRequest and UpdateUserRequest
+│       ├── Data/
+│       │   └── UserStore.cs            # Raw SQL data access
+│       └── Validation/
+│           └── UserValidation.cs       # Input rules and email regex
+├── Migrations/
+│   └── 001_create_users.sql            # Creates the Users table and sample data
+└── data/
+    └── users.db                        # SQLite database (not in source control)
+```
+
+### What each folder is for
+
+- **`Program.cs`** registers services, the global error handler, and the user endpoints. It contains no business logic.
+- **`Common/`** holds code that any feature can use. Future features, such as orders, will reuse these helpers.
+- **`Features/Users/Endpoints/`** reads requests, calls the store or validator, and returns responses.
+- **`Features/Users/Models/`** defines the data shapes for users and requests.
+- **`Features/Users/Data/`** contains all SQL. If the database changes, only this folder changes.
+- **`Features/Users/Validation/`** contains the input rules, which can be tested without running the API.
+
+---
+
+## 3. What we did in each activity
 
 ### Activity 1: CRUD endpoints
 
@@ -41,7 +83,7 @@ Every response is JSON with a `message`. Successful responses that return data a
 - Validated the request fields on POST and PUT.
 - Used an in-memory list to store the users.
 
-### Activity 2: Database layer (final version)
+### Activity 2: Database layer
 
 Activity 2 replaced the in-memory storage with a real SQLite database and included the following work:
 
@@ -50,6 +92,7 @@ Activity 2 replaced the in-memory storage with a real SQLite database and includ
 - **Migration:** `Migrations/001_create_users.sql` creates the `Users` table with `Id`, `Name`, `Email`, `CreatedAt`, and `UpdatedAt`. It also inserts two sample users.
 - **Raw SQL data access:** the `UserStore` class runs parameterized SQL commands. It uses `RETURNING` to get the saved row in the same statement and `UNIQUE` on `Email` to prevent duplicates, even under concurrent requests.
 - **Async endpoints:** all endpoints and store methods are async.
+- **Feature-based structure:** the code was split into `Common/` and `Features/Users/` folders, with one namespace per folder.
 - **Git ignore:** `data/*.db` files are excluded from source control.
 
 ### Database schema
@@ -65,21 +108,6 @@ CREATE TABLE IF NOT EXISTS Users (
 ```
 
 Timestamps are stored as UTC text in ISO 8601 format, for example `2026-10-27T08:06:07Z`.
-
----
-
-## 3. Project structure
-
-```
-UserManagementAPI/
-├── Program.cs
-├── appsettings.json
-├── UserManagementAPI.csproj
-├── Migrations/
-│   └── 001_create_users.sql
-└── data/
-    └── users.db          (created by the migration, not in source control)
-```
 
 ---
 
@@ -244,6 +272,7 @@ sqlite3 data\users.db "SELECT * FROM Users;"
 - Wrote complete code for each step, including the project setup, migration, and store rewrite.
 - Reviewed the first version and found issues: missing validation, inconsistent errors, thread-safety risks, and linear lookups. Then fixed them.
 - Simplified the code without changing the approved behavior.
+- Suggested the feature-based folder structure and wrote the complete code for it.
 - Helped with the setup, including the SQLite installation and PATH problems on Windows.
 - Gave `curl` commands and sample requests and responses for testing.
 - Adjusted the code to your preferences, such as always using braces for `if` blocks and putting the connection string in `appsettings.json`.
