@@ -20,14 +20,14 @@ public static class UserEndpoints
         {
             if (page < 1)
             {
-                return Results.BadRequest(new { message = "Page must be 1 or greater." });
+                return Results.BadRequest(new { error = "Page must be 1 or greater." });
             }
 
             if (pageSize < 1 || pageSize > UserValidation.MaxPageSize)
             {
                 return Results.BadRequest(new
                 {
-                    message = $"Page size must be between 1 and {UserValidation.MaxPageSize}."
+                    error = $"Page size must be between 1 and {UserValidation.MaxPageSize}."
                 });
             }
 
@@ -99,7 +99,7 @@ public static class UserEndpoints
         {
             if (request.Name is null && request.Email is null)
             {
-                return Results.BadRequest(new { message = "Provide at least one field to update: name or email." });
+                return Results.BadRequest(new { error = "Provide at least one field to update: name or email." });
             }
 
             var errors = UserValidation.Validate(request.Name, request.Email, requireAll: false);
