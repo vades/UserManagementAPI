@@ -16,6 +16,7 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
             // Missing or malformed JSON body
             await WriteErrorAsync(context, StatusCodes.Status400BadRequest,
                 "The request body is missing or contains invalid JSON.");
+            return;
         }
         catch (Exception ex)
         {
@@ -24,6 +25,15 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
 
             await WriteErrorAsync(context, StatusCodes.Status500InternalServerError,
                 "Internal server error.");
+            return;
+        }
+
+        // No endpoint matched the URL, so ASP.NET Core returned an empty 404.
+        // Endpoints that return their own 404 are skipped, because they have an endpoint.
+        if (context.GetEndpoint() is null && context.Response.StatusCode == StatusCodes.Status404NotFound)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound,
+                "The requested resource was not found.");
         }
     }
 

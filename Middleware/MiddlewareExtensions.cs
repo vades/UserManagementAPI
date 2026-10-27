@@ -17,4 +17,11 @@ public static class MiddlewareExtensions
 
         return app;
     }
+
+    public static WebApplication UseTokenAuthentication(this WebApplication app)
+    {
+        app.UseMiddleware<TokenAuthenticationMiddleware>();
+
+        return app;
+    }
 }

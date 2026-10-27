@@ -8,10 +8,11 @@ builder.Services.AddSingleton<UserStore>();
 
 var app = builder.Build();
 
-// Pipeline order: logging sees every request and the final status code,
-// error handling turns exceptions into JSON responses
+// Pipeline order (step 5 will confirm it):
+// logging -> error handling -> authentication -> endpoints
 app.UseRequestLogging();
 app.UseErrorHandling();
+app.UseTokenAuthentication();
 
 app.MapUserEndpoints();
 
