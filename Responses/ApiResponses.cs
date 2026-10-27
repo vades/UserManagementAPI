@@ -1,7 +1,6 @@
-using Microsoft.AspNetCore.Http;
 using UserManagementAPI.Features.Users.Models;
 
-namespace UserManagementAPI.Common.Responses;
+namespace UserManagementAPI.Responses;
 
 // Shared error responses used by the endpoints
 public static class ApiResponses

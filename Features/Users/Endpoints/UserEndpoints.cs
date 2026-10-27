@@ -1,10 +1,9 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using UserManagementAPI.Common.Responses;
 using UserManagementAPI.Features.Users.Data;
 using UserManagementAPI.Features.Users.Models;
 using UserManagementAPI.Features.Users.Validation;
-using static UserManagementAPI.Common.Responses.ApiResponses;
+using static UserManagementAPI.Responses.ApiResponses;
 
 namespace UserManagementAPI.Features.Users.Endpoints;
 
