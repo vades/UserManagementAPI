@@ -1,41 +1,26 @@
+using UserManagementAPI.Features.Users.Data;
+using UserManagementAPI.Features.Users.Endpoints;
+using UserManagementAPI.Middleware;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddSingleton<UserStore>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+// Middleware pipeline. Each request passes through these top to bottom,
+// and each response passes back up in reverse order.
+//
+// 1. Logging:          outermost, records every request and the final status code
+// 2. Error handling:   turns exceptions and empty 404s into JSON responses
+// 3. Routing:          matches the URL to an endpoint
+// 4. Authentication:   rejects /api/users requests without a valid token
+// 5. Endpoints:        the actual user operations
+app.UseRequestLogging();
+app.UseErrorHandling();
+app.UseRouting();
+app.UseTokenAuthentication();
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapUserEndpoints();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
